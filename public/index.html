@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Chat Demo</title>
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+    <style>
+      body { font-family: Arial, sans-serif; max-width: 600px; margin: 40px auto; }
+      #chat { border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: auto; }
+      #msgBox { width: 80%; }
+      button { width: 18%; }
+      .self { text-align: right; color: green; }
+      .other { text-align: left; color: blue; }
+    </style>
+  </head>
+  <body>
+    <h2>Simple Chat Demo</h2>
+
+    <div>
+      <label>User ID:</label>
+      <input id="userId" value="user123" />
+      <label>Name:</label>
+      <input id="userName" value="Alice" />
+      <button id="connectBtn">Connect</button>
+    </div>
+
+    <h4>Conversation ID: <input id="convId" value="demo_conversation_1" /></h4>
+
+    <div id="chat"></div>
+    <input id="msgBox" placeholder="Type a message..." />
+    <button id="sendBtn">Send</button>
+
+    <script>
+      let socket;
+
+      document.getElementById("connectBtn").onclick = async () => {
+  const userId = document.getElementById("userId").value;
+  const userName = document.getElementById("userName").value;
+
+  // 🔥 Fetch token from backend
+  const res = await fetch(
+    `http://localhost:4000/token?userId=${userId}&name=${userName}`
+  );
+  const data = await res.json();
+  const token = data.token;
+
+  socket = io("http://localhost:4000", {
+    auth: { token },
+    transports: ["websocket"]
+  });
+
+  socket.on("connect", () => {
+    console.log("connected as", socket.id);
+    const convId = document.getElementById("convId").value;
+    socket.emit("join_room", convId);
+  });
+
+  socket.on("joined_room", (data) => {
+    console.log("joined", data);
+    appendMsg(`✅ Joined room ${data.conversationId}`, "system");
+  });
+
+  socket.on("receive_message", (msg) => {
+    const currentUser = document.getElementById("userId").value;
+    const cls = msg.senderId === currentUser ? "self" : "other";
+    appendMsg(`${msg.senderName}: ${msg.text}`, cls);
+  });
+
+  socket.on("connect_error", (err) => {
+    appendMsg(`❌ Connection error: ${err.message}`, "error");
+  });
+};
+
+
+      document.getElementById("sendBtn").onclick = () => {
+        const text = document.getElementById("msgBox").value;
+        const convId = document.getElementById("convId").value;
+        socket.emit("send_message", { conversationId: convId, text });
+        document.getElementById("msgBox").value = "";
+      };
+
+      function appendMsg(msg, cls) {
+        const div = document.createElement("div");
+        div.className = cls;
+        div.textContent = msg;
+        document.getElementById("chat").appendChild(div);
+        document.getElementById("chat").scrollTop = 9999;
+      }
+    </script>
+  </body>
+</html>
