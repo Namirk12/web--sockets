@@ -1,91 +1,266 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <title>Chat Demo</title>
-    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
-    <style>
-      body { font-family: Arial, sans-serif; max-width: 600px; margin: 40px auto; }
-      #chat { border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: auto; }
-      #msgBox { width: 80%; }
-      button { width: 18%; }
-      .self { text-align: right; color: green; }
-      .other { text-align: left; color: blue; }
-    </style>
-  </head>
-  <body>
-    <h2>Simple Chat Demo</h2>
+<head>
+<meta charset="UTF-8">
+<title>Client–Worker Chat</title>
 
-    <div>
-      <label>User ID:</label>
-      <input id="userId" value="user123" />
-      <label>Name:</label>
-      <input id="userName" value="Alice" />
-      <button id="connectBtn">Connect</button>
-    </div>
+<style>
+  body {
+    background: #f4f4f4;
+    font-family: Arial, sans-serif;
+    margin: 0;
+    display: flex;
+    justify-content: center;
+    padding-top: 40px;
+  }
 
-    <h4>Conversation ID: <input id="convId" value="demo_conversation_1" /></h4>
+  #chatContainer {
+    width: 420px;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.15);
+    overflow: hidden;
+  }
 
-    <div id="chat"></div>
-    <input id="msgBox" placeholder="Type a message..." />
+  /* Header */
+  #chatHeader {
+    padding: 15px 18px;
+    border-bottom: 1px solid #ddd;
+    display: flex;
+    justify-content: space-between;
+    font-weight: bold;
+  }
+
+  #profileIcon {
+    width: 34px;
+    height: 34px;
+    background: #444;
+    color: white;
+    font-weight: bold;
+    display: flex;
+    justify-content: center;
+    border-radius: 50%;
+    align-items: center;
+    cursor: pointer;
+  }
+
+  #dropdown {
+    display: none;
+    position: absolute;
+    right: 20px;
+    top: 80px;
+    width: 160px;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.15);
+  }
+
+  #dropdown div {
+    padding: 12px;
+    cursor: pointer;
+  }
+
+  #dropdown div:hover {
+    background: #eee;
+  }
+
+  /* Chat box */
+  #chatBox {
+    height: 430px;
+    padding: 15px;
+    overflow-y: auto;
+  }
+
+  .msg {
+    padding: 10px 15px;
+    border-radius: 12px;
+    max-width: 75%;
+    margin-bottom: 10px;
+    font-size: 15px;
+    line-height: 1.4;
+  }
+
+  .self {
+    background: #d1e8ff;
+    margin-left: auto;
+  }
+
+  .other {
+    background: #f1f1f1;
+    margin-right: auto;
+  }
+
+  /* Input area */
+  #inputBar {
+    display: flex;
+    padding: 12px;
+    border-top: 1px solid #ddd;
+    background: #fafafa;
+  }
+
+  #msgInput {
+    flex: 1;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+  }
+
+  #sendBtn {
+    margin-left: 8px;
+    padding: 0 20px;
+    background: #3b82f6;
+    border: none;
+    border-radius: 8px;
+    color: white;
+    cursor: pointer;
+  }
+
+  /* Login buttons */
+  #roleSelect {
+    text-align: center;
+    margin-top: 120px;
+  }
+
+  #roleSelect button {
+    padding: 12px 25px;
+    margin: 10px;
+    font-size: 16px;
+    cursor: pointer;
+    border-radius: 8px;
+    border: none;
+    background: #3b82f6;
+    color: white;
+  }
+
+</style>
+</head>
+
+<body>
+
+<!-- LOGIN SCREEN -->
+<div id="roleSelect">
+  <button onclick="login('client')">Login as Client</button>
+  <button onclick="login('worker')">Login as Worker</button>
+</div>
+
+<!-- CHAT UI -->
+<div id="chatContainer" style="display:none;">
+
+  <div id="chatHeader">
+    Chat
+    <div id="profileIcon"></div>
+  </div>
+
+  <!-- Dropdown -->
+  <div id="dropdown">
+    <div id="switchRole"></div>
+  </div>
+
+  <!-- Messages -->
+  <div id="chatBox"></div>
+
+  <!-- Input -->
+  <div id="inputBar">
+    <input id="msgInput" placeholder="Type a message...">
     <button id="sendBtn">Send</button>
+  </div>
+</div>
 
-    <script>
-      let socket;
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 
-      document.getElementById("connectBtn").onclick = async () => {
-  const userId = document.getElementById("userId").value;
-  const userName = document.getElementById("userName").value;
+<script>
+  let socket;
+  let currentUser = null;
+  const conversationId = "client_worker_chat_room";
 
-  // 🔥 Fetch token from backend
-  const res = await fetch(
-    `http://localhost:4000/token?userId=${userId}&name=${userName}`
-  );
-  const data = await res.json();
-  const token = data.token;
+  async function login(role) {
+    const name = role === "client" ? "Client" : "Worker";
 
-  socket = io("http://localhost:4000", {
-    auth: { token },
-    transports: ["websocket"]
-  });
+    const res = await fetch("/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name })
+    }).then(r => r.json());
 
-  socket.on("connect", () => {
-    console.log("connected as", socket.id);
-    const convId = document.getElementById("convId").value;
-    socket.emit("join_room", convId);
-  });
+    currentUser = {
+      role,
+      name,
+      userId: res.userId,
+      token: res.token
+    };
 
-  socket.on("joined_room", (data) => {
-    console.log("joined", data);
-    appendMsg(`✅ Joined room ${data.conversationId}`, "system");
-  });
+    // UI Switch
+    document.getElementById("roleSelect").style.display = "none";
+    document.getElementById("chatContainer").style.display = "block";
 
-  socket.on("receive_message", (msg) => {
-    const currentUser = document.getElementById("userId").value;
-    const cls = msg.senderId === currentUser ? "self" : "other";
-    appendMsg(`${msg.senderName}: ${msg.text}`, cls);
-  });
+    // Update Icon
+    document.getElementById("profileIcon").innerText =
+      role === "client" ? "C" : "W";
 
-  socket.on("connect_error", (err) => {
-    appendMsg(`❌ Connection error: ${err.message}`, "error");
-  });
-};
+    // Update dropdown
+    document.getElementById("switchRole").innerText =
+      role === "client" ? "Switch to Worker" : "Switch to Client";
 
+    startSocket();
+  }
 
-      document.getElementById("sendBtn").onclick = () => {
-        const text = document.getElementById("msgBox").value;
-        const convId = document.getElementById("convId").value;
-        socket.emit("send_message", { conversationId: convId, text });
-        document.getElementById("msgBox").value = "";
-      };
+  function startSocket() {
+    socket = io("/", { auth: { token: currentUser.token } });
 
-      function appendMsg(msg, cls) {
-        const div = document.createElement("div");
-        div.className = cls;
-        div.textContent = msg;
-        document.getElementById("chat").appendChild(div);
-        document.getElementById("chat").scrollTop = 9999;
+    socket.on("connect", () => {
+      socket.emit("join_room", conversationId);
+    });
+
+    socket.on("receive_message", (msg) => {
+      if (msg.senderId !== currentUser.userId) {
+        addMsg(msg.senderName, msg.text);
       }
-    </script>
-  </body>
+    });
+
+    document.getElementById("sendBtn").onclick = sendMsg;
+  }
+
+  function sendMsg() {
+    const text = document.getElementById("msgInput").value.trim();
+    if (!text) return;
+
+    document.getElementById("msgInput").value = "";
+
+    socket.emit("send_message", {
+      conversationId,
+      text
+    });
+
+    addMsg("Me", text, true);
+  }
+
+  function addMsg(sender, text, self=false) {
+    const box = document.getElementById("chatBox");
+    const div = document.createElement("div");
+    div.className = "msg " + (self ? "self" : "other");
+    div.innerText = sender + ": " + text;
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  // Dropdown toggle
+  document.getElementById("profileIcon").onclick = () => {
+    const d = document.getElementById("dropdown");
+    d.style.display = d.style.display === "block" ? "none" : "block";
+  };
+
+  // Switch role
+  document.getElementById("switchRole").onclick = () => {
+    const newRole = currentUser.role === "client" ? "worker" : "client";
+
+    socket.disconnect();
+    document.getElementById("chatBox").innerHTML = "";
+    document.getElementById("dropdown").style.display = "none";
+
+    login(newRole);
+  };
+</script>
+
+</body>
 </html>

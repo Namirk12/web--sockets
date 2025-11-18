@@ -1,3 +1,6 @@
+import authRoutes from "./routes/auth.js";
+import conversationRoutes from "./routes/conversation.js";
+
 
 import express from "express";
 import http from "http";
@@ -7,6 +10,11 @@ import jwt from "jsonwebtoken";
 
 dotenv.config();
 const app = express();
+app.use(express.json()); // for JSON body parsing
+
+app.use("/auth", authRoutes);
+app.use("/conversation", conversationRoutes);
+
 
 app.get("/token", (req, res) => {
     const { userId, name } = req.query;
